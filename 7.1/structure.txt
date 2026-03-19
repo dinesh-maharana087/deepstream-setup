@@ -1,0 +1,22 @@
+deepstream-setup/
+│
+├── install_all.sh
+├── README.md
+├── .gitignore
+│
+├── config/
+│   └── versions.env
+│
+├── install/
+│   ├── 01_prerequisites.sh
+│   ├── 02_cuda.sh
+│   ├── 03_tensorrt.sh
+│   ├── 04_deepstream.sh
+│   └── 05_python_apps.sh
+│
+├── logs/              👈 auto-managed
+│   └── install.log
+│
+└── utils/
+    └── logger.sh
+
