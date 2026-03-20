@@ -2,11 +2,21 @@
 set -e
 set -o pipefail
 
-source ../config/versions.env
-source ../utils/logger.sh
-source ../utils/checks.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+source "$SCRIPT_DIR/../config/versions.env"
+source "$SCRIPT_DIR/../utils/logger.sh"
+source "$SCRIPT_DIR/../utils/check.sh"
 
 echo "🔍 Checking prerequisites..."
+
+# Validate Ubuntu version
+UBUNTU=$(check_ubuntu_version)
+
+if [[ "$UBUNTU" != "$UBUNTU_VERSION" ]]; then
+    echo "❌ Unsupported Ubuntu version: $UBUNTU (Expected: $UBUNTU_VERSION)"
+    exit 1
+fi
 
 PACKAGES=(
 libssl3 libssl-dev libgles2-mesa-dev
@@ -35,4 +45,10 @@ fi
 echo "Installing missing packages: ${MISSING[*]}"
 
 sudo apt update
-sudo apt install -y "${MISSING[@]}"
+
+if [ "$STRICT_MODE" = true ]; then
+    echo "⚠️ Strict mode enabled"
+    sudo apt install -y --no-install-recommends "${MISSING[@]}"
+else
+    sudo apt install -y "${MISSING[@]}"
+fi

@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo "🔍 Running system validation..."
 
 # Source using absolute path
-source "$SCRIPT_DIR/utils/checks.sh"
+source "$SCRIPT_DIR/utils/check.sh"
 
 system_summary
 validate_system

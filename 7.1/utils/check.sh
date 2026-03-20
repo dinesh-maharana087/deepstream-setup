@@ -159,3 +159,21 @@ system_summary() {
 
     echo "================================="
 }
+
+validate_system() {
+    echo "🔍 Validating system..."
+
+    UBUNTU=$(check_ubuntu_version)
+
+    if [[ "$UBUNTU" != "22.04" ]]; then
+        echo "❌ Unsupported Ubuntu version: $UBUNTU"
+        exit 1
+    fi
+
+    if ! check_gpu_available; then
+        echo "❌ GPU not detected"
+        exit 1
+    fi
+
+    echo "✅ System validation passed"
+}
