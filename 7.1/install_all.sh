@@ -5,18 +5,24 @@ set -o pipefail
 
 trap 'echo "❌ Installation failed. Check logs."' ERR
 
+# Get absolute path of this script (VERY IMPORTANT)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 echo "🔍 Running system validation..."
 
-source utils/checks.sh
+# Source using absolute path
+source "$SCRIPT_DIR/utils/checks.sh"
+
 system_summary
 validate_system
 
 echo "🚀 Starting installation..."
 
-bash install/01_prerequisites.sh
-bash install/02_cuda.sh
-bash install/03_tensorrt.sh
-bash install/04_deepstream.sh
-bash install/05_python_apps.sh
+# Run scripts using absolute paths
+bash "$SCRIPT_DIR/install/01_prerequisites.sh"
+bash "$SCRIPT_DIR/install/02_cuda.sh"
+bash "$SCRIPT_DIR/install/03_tensorrt.sh"
+bash "$SCRIPT_DIR/install/04_deepstream.sh"
+bash "$SCRIPT_DIR/install/05_python_apps.sh"
 
 echo "✅ ALL DONE!"
