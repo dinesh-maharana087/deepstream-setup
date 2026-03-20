@@ -1,11 +1,22 @@
 #!/bin/bash
 
-cd install
+set -e
+set -o pipefail
 
-bash 01_prerequisites.sh
-bash 02_cuda.sh
-bash 03_tensorrt.sh
-bash 04_deepstream.sh
-bash 05_python_apps.sh
+trap 'echo "❌ Installation failed. Check logs."' ERR
 
-echo "✅ Installation Completed!"
+echo "🔍 Running system validation..."
+
+source utils/checks.sh
+system_summary
+validate_system
+
+echo "🚀 Starting installation..."
+
+bash install/01_prerequisites.sh
+bash install/02_cuda.sh
+bash install/03_tensorrt.sh
+bash install/04_deepstream.sh
+bash install/05_python_apps.sh
+
+echo "✅ ALL DONE!"
