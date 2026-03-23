@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 source "$SCRIPT_DIR/../config/versions.env"
 source "$SCRIPT_DIR/../utils/logger.sh"
-source "$SCRIPT_DIR/../utils/checks.sh"
+source "$SCRIPT_DIR/../utils/check.sh"
 
 echo "🔍 Checking TensorRT..."
 

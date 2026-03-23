@@ -52,4 +52,6 @@ python3 -m build
 cd dist
 sudo pip3 install *.whl
 
+sudo pip3 install cuda-python==12.5
+
 echo "✅ Python bindings installed successfully"
