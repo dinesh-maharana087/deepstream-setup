@@ -66,7 +66,7 @@ sudo python3 bindings/3rdparty/git-partial-submodule/git-partial-submodule.py re
 echo "Building gst-python..."
 
 cd bindings/3rdparty/gstreamer/subprojects/gst-python/
-meson setup build --reconfigure || true
+meson setup build
 cd build
 ninja
 sudo ninja install
@@ -82,6 +82,6 @@ cd dist
 sudo python3 -m pip install ./*.whl
 
 echo "Installing cuda-python..."
-sudo python3 -m pip install cuda-python
+sudo pip3 install cuda-python==12.5
 
 echo "✅ Python bindings installed successfully"
