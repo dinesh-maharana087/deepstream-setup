@@ -54,7 +54,8 @@ sudo apt-get install -y \
     autoconf \
     automake \
     libgirepository1.0-dev \
-    libcairo2-dev
+    libcairo2-dev \
+    ninja-build
 
 sudo python3 -m pip install --upgrade build
 
@@ -63,13 +64,23 @@ echo "Updating submodules..."
 sudo git submodule update --init
 sudo python3 bindings/3rdparty/git-partial-submodule/git-partial-submodule.py restore-sparse
 
-echo "Building gst-python..."
+echo "Creating gst-python install script..."
+
+cat > install_gst.sh <<'EOF'
+#!/bin/bash
+set -e
 
 cd bindings/3rdparty/gstreamer/subprojects/gst-python/
 meson setup build
 cd build
 ninja
-sudo ninja install
+ninja install
+EOF
+
+chmod +x install_gst.sh
+
+echo "Building gst-python..."
+sudo sh install_gst.sh
 
 cd "$DS_PATH/sources/deepstream_python_apps/bindings"
 
