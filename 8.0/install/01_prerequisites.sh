@@ -24,24 +24,23 @@ if ! sudo -n true 2>/dev/null; then
 fi
 
 # Define required system packages for DeepStream 8.0 on Ubuntu 24.04
-# Note: Ubuntu 24.04 t64 ABI transition renamed several packages (e.g. libssl3 -> libssl3t64)
 PACKAGES=(
-    "libssl3t64"                          # was: libssl3  (Ubuntu 24.04 t64 rename)
+    "libssl3"
     "libssl-dev"
-    "libgles-dev"                         # was: libgles2-mesa-dev  (removed in Ubuntu 24.04)
-    "libgstreamer1.0-0t64"               # was: libgstreamer1.0-0  (Ubuntu 24.04 t64 rename)
+    "libgles2-mesa-dev"
+    "libgstreamer1.0-0"
     "gstreamer1.0-tools"
     "gstreamer1.0-plugins-good"
     "gstreamer1.0-plugins-bad"
     "gstreamer1.0-plugins-ugly"
     "gstreamer1.0-libav"
     "libgstreamer-plugins-base1.0-dev"
-    "libgstrtspserver-1.0-0t64"          # was: libgstrtspserver-1.0-0  (Ubuntu 24.04 t64 rename)
-    "libjansson4t64"                      # was: libjansson4  (Ubuntu 24.04 t64 rename)
+    "libgstrtspserver-1.0-0"
+    "libjansson4"
     "libyaml-cpp-dev"
     "libjsoncpp-dev"
     "protobuf-compiler"
-    "libmosquitto2"                       # was: libmosquitto1  (Ubuntu 24.04 ships mosquitto 2.x)
+    "libmosquitto1"
     "gcc"
     "make"
     "git"
@@ -52,11 +51,14 @@ PACKAGES=(
     "wget"
 )
 
-# Helper: check if a package is installed, accounting for Ubuntu 24.04 t64 renames.
-# dpkg registers the t64 variant name, so we try both "pkg" and "pkgt64".
+# Helper: check if a package is installed.
+# Uses `apt-cache policy` instead of `dpkg -s` to correctly handle cases where
+# apt resolves a package name to a differently-named installed package (e.g.
+# libssl3 -> libssl3t64 on some Ubuntu 24.04 configurations).
 is_installed() {
-    local pkg="$1"
-    dpkg -s "$pkg" >/dev/null 2>&1 || dpkg -s "${pkg}t64" >/dev/null 2>&1
+    local status
+    status=$(apt-cache policy "$1" 2>/dev/null | awk '/Installed:/{print $2}')
+    [[ -n "$status" && "$status" != "(none)" ]]
 }
 
 # Check which packages are missing (idempotency: avoid reinstalling)
