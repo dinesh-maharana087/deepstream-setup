@@ -1,107 +1,166 @@
 #!/bin/bash
 
-# Error handling: exit on any error, show line numbers
-set -e
-set -o pipefail
-trap 'log_error "Prerequisites installation failed at line $LINENO"; exit 1' ERR
+###############################################################################
+# DeepStream 8.0 Prerequisites Installer
+#
+# Ubuntu: 24.04
+# Safe for repeated execution.
+# Production-grade package installation.
+###############################################################################
+
+set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Source configuration and utilities
 source "$SCRIPT_DIR/../config/versions.env"
 source "$SCRIPT_DIR/../utils/logger.sh"
 source "$SCRIPT_DIR/../utils/check.sh"
 
-log_info "🔍 Installing system prerequisites..."
+trap 'log_error "Prerequisites installation failed at line ${LINENO}"; exit 1' ERR
 
-# Pre-flight validation: Ubuntu 24.04, versions defined, sudo available
+###############################################################################
+# Configuration
+###############################################################################
+
+export DEBIAN_FRONTEND=noninteractive
+
+APT_OPTIONS=(
+    "-y"
+    "-q"
+    "-o" "Dpkg::Use-Pty=0"
+    "-o" "Acquire::Retries=5"
+    "-o" "Acquire::http::Timeout=30"
+    "-o" "Acquire::https::Timeout=30"
+)
+
+PACKAGES=(
+    libssl3
+    libssl-dev
+    libgles2-mesa-dev
+    libgstreamer1.0-0
+    gstreamer1.0-tools
+    gstreamer1.0-plugins-good
+    gstreamer1.0-plugins-bad
+    gstreamer1.0-plugins-ugly
+    gstreamer1.0-libav
+    libgstreamer-plugins-base1.0-dev
+    libgstrtspserver-1.0-0
+    libjansson4
+    libyaml-cpp-dev
+    libjsoncpp-dev
+    protobuf-compiler
+    libmosquitto1
+    gcc
+    g++
+    make
+    git
+    curl
+    wget
+    unzip
+    pkg-config
+    python3
+    python3-dev
+    python3-pip
+    python3-venv
+)
+
+###############################################################################
+# Helper Functions
+###############################################################################
+
+wait_for_apt_lock() {
+
+    log_info "Waiting for package manager lock..."
+
+    while \
+        sudo fuser /var/lib/dpkg/lock >/dev/null 2>&1 || \
+        sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
+        sudo fuser /var/cache/apt/archives/lock >/dev/null 2>&1
+    do
+        sleep 2
+    done
+}
+
+apt_update() {
+
+    local attempt
+
+    for attempt in {1..5}; do
+
+        if sudo apt-get update; then
+            return 0
+        fi
+
+        log_warning "apt update failed (attempt ${attempt}/5). Retrying..."
+
+        sleep 5
+    done
+
+    log_error "Unable to update package index."
+
+    exit 1
+}
+
+###############################################################################
+# Validation
+###############################################################################
+
+log_info "Installing system prerequisites..."
+
 validate_system
 validate_versions_before_install
 
 if ! sudo -n true 2>/dev/null; then
-    log_error "❌ This script requires sudo access"
+    log_error "Passwordless sudo is required."
     exit 1
 fi
 
-# Define required system packages for DeepStream 8.0 on Ubuntu 24.04
-PACKAGES=(
-    "libssl3"
-    "libssl-dev"
-    "libgles2-mesa-dev"
-    "libgstreamer1.0-0"
-    "gstreamer1.0-tools"
-    "gstreamer1.0-plugins-good"
-    "gstreamer1.0-plugins-bad"
-    "gstreamer1.0-plugins-ugly"
-    "gstreamer1.0-libav"
-    "libgstreamer-plugins-base1.0-dev"
-    "libgstrtspserver-1.0-0"
-    "libjansson4"
-    "libyaml-cpp-dev"
-    "libjsoncpp-dev"
-    "protobuf-compiler"
-    "libmosquitto1"
-    "gcc"
-    "make"
-    "git"
-    "python3"
-    "python3-pip"
-    "python3-venv"
-    "curl"
-    "wget"
-)
+###############################################################################
+# Installation
+###############################################################################
 
-# Helper: check if a package is installed.
-# Uses `apt-cache policy` instead of `dpkg -s` to correctly handle cases where
-# apt resolves a package name to a differently-named installed package (e.g.
-# libssl3 -> libssl3t64 on some Ubuntu 24.04 configurations).
-is_installed() {
-    local status
-    status=$(apt-cache policy "$1" 2>/dev/null | awk '/Installed:/{print $2}')
-    [[ -n "$status" && "$status" != "(none)" ]]
-}
+wait_for_apt_lock
 
-# Check which packages are missing (idempotency: avoid reinstalling)
-MISSING=()
-for pkg in "${PACKAGES[@]}"; do
-    if ! is_installed "$pkg"; then
-        MISSING+=("$pkg")
-    fi
-done
+log_info "Updating package index..."
 
-if [ ${#MISSING[@]} -eq 0 ]; then
-    log_success "✅ All system prerequisites already installed"
-    exit 0
+apt_update
+
+log_info "Installing prerequisite packages..."
+
+sudo apt-get install \
+    "${APT_OPTIONS[@]}" \
+    "${PACKAGES[@]}"
+
+###############################################################################
+# Verification
+###############################################################################
+
+log_info "Verifying installation..."
+
+BROKEN_PKGS=$(dpkg -l | awk '$1=="iF" || $1=="iU" || $1=="rc"{print $2}')
+
+if [[ -n "$BROKEN_PKGS" ]]; then
+
+    log_error "Broken packages detected:"
+
+    echo "$BROKEN_PKGS"
+
+    sudo apt-get -f install -y
+
 fi
 
-log_info "Installing ${#MISSING[@]} missing package(s)..."
-log_info "Packages: ${MISSING[*]}"
+###############################################################################
+# Cleanup
+###############################################################################
 
-# Update apt index before installation
-log_info "Updating apt package index..."
-sudo apt-get update -q
+log_info "Cleaning apt cache..."
 
-# Install missing packages with -y flag for automation
-log_info "Installing packages (this may take several minutes)..."
-sudo apt-get install -y "${MISSING[@]}"
+sudo apt-get autoremove -y
+sudo apt-get autoclean -y
+sudo apt-get clean
 
-# Verify installation
-log_info "Verifying package installation..."
-FAILED_PACKAGES=()
-for pkg in "${MISSING[@]}"; do
-    if ! is_installed "$pkg"; then
-        FAILED_PACKAGES+=("$pkg")
-    fi
-done
+###############################################################################
+# Done
+###############################################################################
 
-if [ ${#FAILED_PACKAGES[@]} -gt 0 ]; then
-    log_error "❌ Failed to install: ${FAILED_PACKAGES[*]}"
-    exit 1
-fi
-
-# Cleanup apt cache to reduce disk usage
-log_info "Cleaning up apt cache..."
-sudo apt-get clean -qq
-sudo apt-get autoclean -qq
-
-log_success "✅ System prerequisites installation completed successfully"
+log_success "System prerequisite installation completed successfully."
