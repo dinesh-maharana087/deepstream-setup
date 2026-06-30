@@ -2,14 +2,7 @@
 
 ###############################################################################
 # DeepStream 8.0 Prerequisites Installer
-#
-# Ubuntu: 24.04
-# Production-safe:
-# - Installs only listed prerequisite packages
-# - No autoremove
-# - No automatic dependency repair
-# - Performs apt simulation before install
-# - Safe for repeated execution
+# Ubuntu 24.04
 ###############################################################################
 
 set -Eeuo pipefail
@@ -27,14 +20,38 @@ export DEBIAN_FRONTEND=noninteractive
 APT_OPTIONS=(
     "-y"
     "-q"
+    "--no-upgrade"
     "-o" "Dpkg::Use-Pty=0"
     "-o" "Acquire::Retries=5"
     "-o" "Acquire::http::Timeout=30"
     "-o" "Acquire::https::Timeout=30"
 )
 
-PACKAGES=(
+INSTALL_PACKAGES=(
     libssl3
+    libssl-dev
+    libgles2-mesa-dev
+    libgstreamer1.0-0
+    gstreamer1.0-tools
+    gstreamer1.0-plugins-good
+    gstreamer1.0-plugins-bad
+    gstreamer1.0-plugins-ugly
+    gstreamer1.0-libav
+    libgstreamer-plugins-base1.0-dev
+    libgstrtspserver-1.0-0
+    libjansson4
+    libyaml-cpp-dev
+    libjsoncpp-dev
+    protobuf-compiler
+    libmosquitto1
+    gcc
+    make
+    git
+    python3
+)
+
+VERIFY_PACKAGES=(
+    libssl3t64
     libssl-dev
     libgles2-mesa-dev
     libgstreamer1.0-0
@@ -84,6 +101,17 @@ apt_update() {
     exit 1
 }
 
+check_sudo() {
+    if [[ "$EUID" -eq 0 ]]; then
+        return 0
+    fi
+
+    if ! sudo -v; then
+        log_error "sudo access is required."
+        exit 1
+    fi
+}
+
 check_broken_packages() {
     local broken_pkgs
 
@@ -92,26 +120,27 @@ check_broken_packages() {
     if [[ -n "$broken_pkgs" ]]; then
         log_error "Broken or half-installed packages detected:"
         echo "$broken_pkgs"
-        log_error "Please fix broken packages manually before running this production installer."
+        log_error "Fix broken packages manually before running this installer."
         exit 1
     fi
 }
 
 simulate_install() {
+    local simulation_output
+
     log_info "Running apt simulation before installation..."
 
-    if ! sudo apt-get install --simulate "${PACKAGES[@]}"; then
-        log_error "Apt simulation failed. No packages were installed."
+    simulation_output="$(sudo apt-get install --simulate "${APT_OPTIONS[@]}" "${INSTALL_PACKAGES[@]}")"
+
+    echo "$simulation_output"
+
+    if grep -E "^Remv " <<< "$simulation_output" >/dev/null 2>&1; then
+        log_error "Apt simulation indicates package removal. Aborting."
         exit 1
     fi
 
-    local simulation_output
-    simulation_output="$(sudo apt-get install --simulate "${PACKAGES[@]}")"
-
-    if echo "$simulation_output" | grep -E "^Remv |^Conf .* \[.*\]" >/dev/null 2>&1; then
-        log_error "Apt simulation indicates package removal or version changes."
-        echo "$simulation_output"
-        log_error "Aborting for production safety."
+    if grep -E "^Inst .* \[.*\]" <<< "$simulation_output" >/dev/null 2>&1; then
+        log_error "Apt simulation indicates package upgrade/change. Aborting."
         exit 1
     fi
 
@@ -119,16 +148,17 @@ simulate_install() {
 }
 
 verify_installed() {
+    local pkg
     local missing=()
 
-    for pkg in "${PACKAGES[@]}"; do
-        if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+    for pkg in "${VERIFY_PACKAGES[@]}"; do
+        if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed"; then
             missing+=("$pkg")
         fi
     done
 
     if (( ${#missing[@]} > 0 )); then
-        log_error "Some packages were not installed:"
+        log_error "Some required packages were not installed:"
         printf '%s\n' "${missing[@]}"
         exit 1
     fi
@@ -138,14 +168,9 @@ log_info "Installing DeepStream prerequisite packages..."
 
 validate_system
 validate_versions_before_install
-
-if ! sudo -n true 2>/dev/null; then
-    log_error "Passwordless sudo is required."
-    exit 1
-fi
+check_sudo
 
 wait_for_apt_lock
-
 check_broken_packages
 
 log_info "Updating package index..."
@@ -154,9 +179,7 @@ apt_update
 simulate_install
 
 log_info "Installing prerequisite packages..."
-sudo apt-get install \
-    "${APT_OPTIONS[@]}" \
-    "${PACKAGES[@]}"
+sudo apt-get install "${APT_OPTIONS[@]}" "${INSTALL_PACKAGES[@]}"
 
 log_info "Verifying installation..."
 check_broken_packages
