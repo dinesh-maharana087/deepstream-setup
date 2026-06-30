@@ -24,23 +24,24 @@ if ! sudo -n true 2>/dev/null; then
 fi
 
 # Define required system packages for DeepStream 8.0 on Ubuntu 24.04
+# Note: Ubuntu 24.04 t64 ABI transition renamed several packages (e.g. libssl3 -> libssl3t64)
 PACKAGES=(
-    "libssl3"
+    "libssl3t64"                          # was: libssl3  (Ubuntu 24.04 t64 rename)
     "libssl-dev"
-    "libgles2-mesa-dev"
-    "libgstreamer1.0-0"
+    "libgles-dev"                         # was: libgles2-mesa-dev  (removed in Ubuntu 24.04)
+    "libgstreamer1.0-0t64"               # was: libgstreamer1.0-0  (Ubuntu 24.04 t64 rename)
     "gstreamer1.0-tools"
     "gstreamer1.0-plugins-good"
     "gstreamer1.0-plugins-bad"
     "gstreamer1.0-plugins-ugly"
     "gstreamer1.0-libav"
     "libgstreamer-plugins-base1.0-dev"
-    "libgstrtspserver-1.0-0"
-    "libjansson4"
+    "libgstrtspserver-1.0-0t64"          # was: libgstrtspserver-1.0-0  (Ubuntu 24.04 t64 rename)
+    "libjansson4t64"                      # was: libjansson4  (Ubuntu 24.04 t64 rename)
     "libyaml-cpp-dev"
     "libjsoncpp-dev"
     "protobuf-compiler"
-    "libmosquitto1"
+    "libmosquitto2"                       # was: libmosquitto1  (Ubuntu 24.04 ships mosquitto 2.x)
     "gcc"
     "make"
     "git"
@@ -51,10 +52,17 @@ PACKAGES=(
     "wget"
 )
 
+# Helper: check if a package is installed, accounting for Ubuntu 24.04 t64 renames.
+# dpkg registers the t64 variant name, so we try both "pkg" and "pkgt64".
+is_installed() {
+    local pkg="$1"
+    dpkg -s "$pkg" >/dev/null 2>&1 || dpkg -s "${pkg}t64" >/dev/null 2>&1
+}
+
 # Check which packages are missing (idempotency: avoid reinstalling)
 MISSING=()
 for pkg in "${PACKAGES[@]}"; do
-    if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+    if ! is_installed "$pkg"; then
         MISSING+=("$pkg")
     fi
 done
@@ -69,7 +77,7 @@ log_info "Packages: ${MISSING[*]}"
 
 # Update apt index before installation
 log_info "Updating apt package index..."
-sudo apt-get update -qq
+sudo apt-get update -q
 
 # Install missing packages with -y flag for automation
 log_info "Installing packages (this may take several minutes)..."
@@ -79,7 +87,7 @@ sudo apt-get install -y "${MISSING[@]}"
 log_info "Verifying package installation..."
 FAILED_PACKAGES=()
 for pkg in "${MISSING[@]}"; do
-    if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+    if ! is_installed "$pkg"; then
         FAILED_PACKAGES+=("$pkg")
     fi
 done
@@ -95,4 +103,3 @@ sudo apt-get clean -qq
 sudo apt-get autoclean -qq
 
 log_success "✅ System prerequisites installation completed successfully"
-
