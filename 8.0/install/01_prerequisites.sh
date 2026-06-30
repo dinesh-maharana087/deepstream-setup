@@ -4,8 +4,12 @@
 # DeepStream 8.0 Prerequisites Installer
 #
 # Ubuntu: 24.04
-# Safe for repeated execution.
-# Production-grade package installation.
+# Production-safe:
+# - Installs only listed prerequisite packages
+# - No autoremove
+# - No automatic dependency repair
+# - Performs apt simulation before install
+# - Safe for repeated execution
 ###############################################################################
 
 set -Eeuo pipefail
@@ -17,10 +21,6 @@ source "$SCRIPT_DIR/../utils/logger.sh"
 source "$SCRIPT_DIR/../utils/check.sh"
 
 trap 'log_error "Prerequisites installation failed at line ${LINENO}"; exit 1' ERR
-
-###############################################################################
-# Configuration
-###############################################################################
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -51,25 +51,12 @@ PACKAGES=(
     protobuf-compiler
     libmosquitto1
     gcc
-    g++
     make
     git
-    curl
-    wget
-    unzip
-    pkg-config
     python3
-    python3-dev
-    python3-pip
-    python3-venv
 )
 
-###############################################################################
-# Helper Functions
-###############################################################################
-
 wait_for_apt_lock() {
-
     log_info "Waiting for package manager lock..."
 
     while \
@@ -82,30 +69,72 @@ wait_for_apt_lock() {
 }
 
 apt_update() {
-
     local attempt
 
     for attempt in {1..5}; do
-
         if sudo apt-get update; then
             return 0
         fi
 
-        log_warning "apt update failed (attempt ${attempt}/5). Retrying..."
-
+        log_warning "apt update failed attempt ${attempt}/5. Retrying..."
         sleep 5
     done
 
     log_error "Unable to update package index."
-
     exit 1
 }
 
-###############################################################################
-# Validation
-###############################################################################
+check_broken_packages() {
+    local broken_pkgs
 
-log_info "Installing system prerequisites..."
+    broken_pkgs="$(dpkg -l | awk '$1=="iF" || $1=="iU" || $1=="iH"{print $2}')"
+
+    if [[ -n "$broken_pkgs" ]]; then
+        log_error "Broken or half-installed packages detected:"
+        echo "$broken_pkgs"
+        log_error "Please fix broken packages manually before running this production installer."
+        exit 1
+    fi
+}
+
+simulate_install() {
+    log_info "Running apt simulation before installation..."
+
+    if ! sudo apt-get install --simulate "${PACKAGES[@]}"; then
+        log_error "Apt simulation failed. No packages were installed."
+        exit 1
+    fi
+
+    local simulation_output
+    simulation_output="$(sudo apt-get install --simulate "${PACKAGES[@]}")"
+
+    if echo "$simulation_output" | grep -E "^Remv |^Conf .* \[.*\]" >/dev/null 2>&1; then
+        log_error "Apt simulation indicates package removal or version changes."
+        echo "$simulation_output"
+        log_error "Aborting for production safety."
+        exit 1
+    fi
+
+    log_success "Apt simulation passed."
+}
+
+verify_installed() {
+    local missing=()
+
+    for pkg in "${PACKAGES[@]}"; do
+        if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+            missing+=("$pkg")
+        fi
+    done
+
+    if (( ${#missing[@]} > 0 )); then
+        log_error "Some packages were not installed:"
+        printf '%s\n' "${missing[@]}"
+        exit 1
+    fi
+}
+
+log_info "Installing DeepStream prerequisite packages..."
 
 validate_system
 validate_versions_before_install
@@ -115,52 +144,25 @@ if ! sudo -n true 2>/dev/null; then
     exit 1
 fi
 
-###############################################################################
-# Installation
-###############################################################################
-
 wait_for_apt_lock
 
-log_info "Updating package index..."
+check_broken_packages
 
+log_info "Updating package index..."
 apt_update
 
-log_info "Installing prerequisite packages..."
+simulate_install
 
+log_info "Installing prerequisite packages..."
 sudo apt-get install \
     "${APT_OPTIONS[@]}" \
     "${PACKAGES[@]}"
 
-###############################################################################
-# Verification
-###############################################################################
-
 log_info "Verifying installation..."
+check_broken_packages
+verify_installed
 
-BROKEN_PKGS=$(dpkg -l | awk '$1=="iF" || $1=="iU" || $1=="rc"{print $2}')
-
-if [[ -n "$BROKEN_PKGS" ]]; then
-
-    log_error "Broken packages detected:"
-
-    echo "$BROKEN_PKGS"
-
-    sudo apt-get -f install -y
-
-fi
-
-###############################################################################
-# Cleanup
-###############################################################################
-
-log_info "Cleaning apt cache..."
-
-sudo apt-get autoremove -y
+log_info "Cleaning apt package cache only..."
 sudo apt-get autoclean -y
-sudo apt-get clean
 
-###############################################################################
-# Done
-###############################################################################
-
-log_success "System prerequisite installation completed successfully."
+log_success "DeepStream prerequisite package installation completed successfully."
