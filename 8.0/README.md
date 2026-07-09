@@ -7,7 +7,7 @@ Automated installer for NVIDIA DeepStream 8.0 on Ubuntu 24.04 LTS. Production-re
 - **OS**: Ubuntu 24.04 LTS (strictly enforced)
 - **GPU**: NVIDIA GPU with CUDA compute capability 5.0 or higher
 - **Network**: Internet access to download packages
-- **Sudo**: Passwordless sudo access required, OR run with `sudo bash install_all.sh`
+- **Sudo**: Sudo access required. Password prompts are supported.
 - **Storage**: ~10GB free disk space
 - **CUDA Driver**: NVIDIA GPU driver pre-installed
 
@@ -24,6 +24,9 @@ chmod +x install/*.sh utils/*.sh
 
 # Run the installer
 bash install_all.sh
+
+# Or run with sudo; files and the virtualenv are still owned by the sudo login user
+sudo bash install_all.sh
 ```
 
 ## Installation Details
@@ -64,11 +67,15 @@ Edit `config/versions.env` to customize:
 # Working directory (default: $HOME/deepstream-install)
 export WORK_DIR="$HOME/deepstream-install"
 
-# Versions (strictly pinned to 8.0)
+# Versions and package identifiers
 export DEEPSTREAM_VERSION="8.0"
-export CUDA_VERSION="12-8"
-export TENSORRT_VERSION="10.9.0.34-1+cuda12.8"
+export CUDA_VERSION="12.8"
+export CUDA_PACKAGE_VERSION="12-8"
+export CUDA_APT_PACKAGE="cuda-toolkit-${CUDA_PACKAGE_VERSION}"
+export TENSORRT_VERSION="10.9"
+export TENSORRT_PACKAGE_VERSION="10.9.0.34-1+cuda12.8"
 export PYTHON_APPS_VERSION="v1.2.2"
+export CUDA_PYTHON_PACKAGE_SPEC="cuda-python>=12.8,<12.9"
 ```
 
 ### Environment Variables
@@ -79,6 +86,9 @@ GPU_REQUIRED=false bash install_all.sh
 
 # Custom work directory
 WORK_DIR=/opt/deepstream bash install_all.sh
+
+# Override detected install user if needed
+INSTALL_USER=myuser sudo bash install_all.sh
 
 # Continue on errors (testing only)
 CONTINUE_ON_ERROR=true bash install_all.sh
@@ -119,7 +129,7 @@ source $HOME/deepstream-install/deepstream_venv/bin/activate
 python3 -c "import pyds; print(f'PyDS: {pyds.__version__}')"
 
 # Run Python DeepStream apps
-cd $HOME/deepstream-install/deepstream_python_apps/
+cd /opt/nvidia/deepstream/deepstream-8.0/sources/deepstream_python_apps/
 python3 apps/deepstream-test1/deepstream_test1.py
 
 # Deactivate when done
@@ -156,7 +166,7 @@ dpkg -l | grep libnvinfer
 
 # Check DeepStream
 ls /opt/nvidia/deepstream
-/opt/nvidia/deepstream/tools/gst-launch-1.0 --version
+/opt/nvidia/deepstream/deepstream-8.0/bin/deepstream-app --version-all
 
 # Check Python bindings
 source $HOME/deepstream-install/deepstream_venv/bin/activate
@@ -193,20 +203,24 @@ cat config/versions.env
 
 ### Permission Errors
 
-Ensure passwordless sudo or run with sudo:
+Ensure your user can run sudo. The installer supports the normal sudo password prompt and detects the original login user through `SUDO_USER` when run as root.
 
 ```bash
-# Method 1: Add to sudoers (run without password)
-sudo visudo
-# Add: your_user ALL=(ALL) NOPASSWD: ALL
+# Run as your user
+bash install_all.sh
 
-# Method 2: Run installer with sudo
+# Or run through sudo while preserving user-owned install paths
 sudo bash install_all.sh
+
+# If user detection is unusual, set it explicitly
+INSTALL_USER=myuser sudo bash install_all.sh
 ```
 
 ### Installation Logs
 
 Logs are saved to: `$WORK_DIR/logs/install.log`
+
+Failures include the installer step, script path, line number, command, and log file path.
 
 ```bash
 # View installation log
@@ -282,9 +296,10 @@ WORK_DIR=/tmp/deepstream-test bash install_all.sh
 ## Key Features
 
 ✅ **Production-Ready**
-- Comprehensive error handling with line-number reporting
+- Comprehensive error handling with step, script, command, and line-number reporting
 - All apt operations use `-y` for non-interactive automation
 - Idempotent: safe to re-run without duplication
+- Validates CUDA/TensorRT package identifiers before installing pinned versions
 
 ✅ **Modern & Secure**
 - Replaces deprecated `apt-key` with GPG keyring method

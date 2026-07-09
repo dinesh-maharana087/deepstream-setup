@@ -1,9 +1,8 @@
 #!/bin/bash
 
 # Error handling: exit on any error, show line numbers
-set -e
-set -o pipefail
-trap 'log_error "CUDA installation failed at line $LINENO"; exit 1' ERR
+set -Eeuo pipefail
+trap 'echo "[ERROR] CUDA Toolkit failed at line $LINENO: $BASH_COMMAND" >&2; exit 1' ERR
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -12,27 +11,26 @@ source "$SCRIPT_DIR/../config/versions.env"
 source "$SCRIPT_DIR/../utils/logger.sh"
 source "$SCRIPT_DIR/../utils/check.sh"
 
+trap 'log_failure "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" "CUDA Toolkit"; exit 1' ERR
+
 log_info "🔍 Checking CUDA installation..."
 
 # Pre-flight validation
 validate_system
 validate_versions_before_install
 
-if ! sudo -n true 2>/dev/null; then
-    log_error "❌ This script requires sudo access"
-    exit 1
-fi
+require_sudo
 
 # Check if CUDA is already installed (idempotency)
-if check_cuda; then
+if check_cuda && [[ "$(get_cuda_version)" == "$CUDA_VERSION"* ]]; then
     log_success "✅ CUDA already installed: $(get_cuda_version)"
     exit 0
 fi
 
-log_info "Installing CUDA $CUDA_VERSION..."
+log_info "Installing CUDA $CUDA_VERSION ($CUDA_APT_PACKAGE)..."
 
 # Ensure work directory exists
-mkdir -p "$WORK_DIR"
+ensure_user_owned_dir "$WORK_DIR"
 cd "$WORK_DIR"
 
 # Download and setup NVIDIA CUDA repository GPG key using modern keyring method
@@ -51,8 +49,8 @@ fi
 
 # Convert GPG key to binary format and install to system keyring (requires sudo)
 log_info "Installing GPG key to system keyring..."
-sudo gpg --dearmour -o "$KEYRING_PATH" "$TEMP_KEY" 2>/dev/null
-if [ $? -ne 0 ]; then
+if ! sudo gpg --batch --yes --dearmor -o "$KEYRING_PATH" "$TEMP_KEY"; then
+    log_error "Failed to install GPG key"
     log_error "❌ Failed to install GPG key"
     rm -f "$TEMP_KEY"
     exit 1
@@ -68,25 +66,34 @@ sudo sh -c "echo '$CUDA_REPO' > /etc/apt/sources.list.d/nvidia-cuda.list"
 
 # Update package index with new repository
 log_info "Updating package index with CUDA repository..."
-sudo apt-get update -qq
+apt_update
+
+if ! apt_package_available "$CUDA_APT_PACKAGE"; then
+    log_error "CUDA package not found in apt repositories: $CUDA_APT_PACKAGE"
+    log_error "Expected CUDA display version: $CUDA_VERSION"
+    log_error "Expected CUDA package suffix: $CUDA_PACKAGE_VERSION"
+    exit 1
+fi
 
 # Install CUDA toolkit with -y flag
 log_info "Installing CUDA toolkit (this may take several minutes)..."
-sudo apt-get install -y cuda-toolkit-"${CUDA_VERSION}" 2>&1 | grep -v "^Reading\|^Building\|^Selecting"
+sudo apt-get install -y "$CUDA_APT_PACKAGE"
 
 # Verify CUDA installation by checking for nvcc
 log_info "Verifying CUDA installation..."
-if ! command -v nvcc >/dev/null 2>&1; then
+NVCC_BIN="$(get_cuda_nvcc 2>/dev/null || true)"
+if [[ -z "$NVCC_BIN" ]]; then
     # Set CUDA path if nvcc not in PATH
     export PATH="/usr/local/cuda/bin:$PATH"
     
-    if ! command -v nvcc >/dev/null 2>&1; then
+    NVCC_BIN="$(get_cuda_nvcc 2>/dev/null || true)"
+    if [[ -z "$NVCC_BIN" ]]; then
         log_error "❌ CUDA installation verification failed (nvcc not found)"
         exit 1
     fi
 fi
 
-CUDA_VERSION_INSTALLED=$(nvcc --version | grep "release" | awk '{print $5}' | cut -d'.' -f1-2)
+CUDA_VERSION_INSTALLED=$("$NVCC_BIN" --version | awk -F'release ' '/release/ {print $2}' | awk -F',' '{print $1}')
 log_success "✅ CUDA installation completed successfully"
 log_info "   Installed version: $CUDA_VERSION_INSTALLED"
 log_info "   Expected version: $CUDA_VERSION"

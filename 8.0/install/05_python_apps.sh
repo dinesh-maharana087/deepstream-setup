@@ -20,10 +20,10 @@ cleanup_python_install() {
     rm -rf "$PYDS_DIR/bindings/.eggs" || true
 }
 
-trap 'log_error "Python bindings installation failed at line ${LINENO}"; cleanup_python_install; exit 1' ERR
+trap 'log_failure "${BASH_SOURCE[0]}" "${LINENO}" "${BASH_COMMAND}" "Python Bindings"; cleanup_python_install; exit 1' ERR
 
 run_as_user() {
-    sudo -u "$INSTALL_USER" -H bash -c "$1"
+    run_as_install_user "$1"
 }
 
 log_info "Checking Python bindings installation..."
@@ -31,10 +31,7 @@ log_info "Checking Python bindings installation..."
 validate_system
 validate_versions_before_install
 
-if ! sudo -v; then
-    log_error "sudo access is required."
-    exit 1
-fi
+require_sudo
 
 log_info "Install user: $INSTALL_USER"
 log_info "Install home: $INSTALL_HOME"
@@ -49,11 +46,10 @@ if [[ ! -d "$DS_DIR" ]]; then
     exit 1
 fi
 
-sudo mkdir -p "$WORK_DIR"
-sudo chown -R "$INSTALL_USER:$INSTALL_USER" "$WORK_DIR"
+ensure_user_owned_dir "$WORK_DIR"
 
 sudo mkdir -p "$DS_SOURCES_DIR"
-sudo chown -R "$INSTALL_USER:$INSTALL_USER" "$DS_SOURCES_DIR"
+sudo chown -R "$INSTALL_USER:${INSTALL_GROUP:-$INSTALL_USER}" "$DS_SOURCES_DIR"
 
 if [[ -x "$VENV_PATH/bin/python3" ]]; then
     if "$VENV_PATH/bin/python3" -c "import pyds" >/dev/null 2>&1; then
@@ -66,29 +62,47 @@ fi
 
 log_info "Installing Python build dependencies..."
 
-sudo apt-get update
+apt_update
 
-sudo apt-get install -y \
-    git \
-    python3-gi \
-    python3-dev \
-    python3-gst-1.0 \
-    python-gi-dev \
-    python3-venv \
-    python3-pip \
-    meson \
-    cmake \
-    g++ \
-    build-essential \
-    libglib2.0-dev \
-    libgstreamer1.0-dev \
-    libgstreamer-plugins-base1.0-dev \
-    libtool \
-    m4 \
-    autoconf \
-    automake \
-    libgirepository-2.0-dev \
+PYTHON_BUILD_PACKAGES=(
+    git
+    python3-gi
+    python3-dev
+    python3-gst-1.0
+    python3-venv
+    python3-pip
+    meson
+    cmake
+    g++
+    build-essential
+    gobject-introspection
+    libglib2.0-dev
+    libgstreamer1.0-dev
+    libgstreamer-plugins-base1.0-dev
+    libtool
+    m4
+    autoconf
+    automake
     libcairo2-dev
+)
+
+if apt_package_available python-gi-dev; then
+    PYTHON_BUILD_PACKAGES+=(python-gi-dev)
+else
+    log_warn "Optional package python-gi-dev is not available; continuing with python3-gi."
+fi
+
+if apt_package_available libgirepository-2.0-dev; then
+    PYTHON_BUILD_PACKAGES+=(libgirepository-2.0-dev)
+elif apt_package_available libgirepository1.0-dev; then
+    PYTHON_BUILD_PACKAGES+=(libgirepository1.0-dev)
+else
+    log_error "No supported GObject introspection development package found."
+    log_error "Tried: libgirepository-2.0-dev, libgirepository1.0-dev"
+    exit 1
+fi
+
+sudo apt-get install -y "${PYTHON_BUILD_PACKAGES[@]}"
 
 if [[ ! -d "$VENV_PATH" ]]; then
     log_info "Creating Python virtual environment..."
@@ -111,7 +125,7 @@ else
     run_as_user "cd '$PYDS_DIR' && git checkout '$PYTHON_APPS_VERSION'"
 fi
 
-sudo chown -R "$INSTALL_USER:$INSTALL_USER" "$PYDS_DIR"
+sudo chown -R "$INSTALL_USER:${INSTALL_GROUP:-$INSTALL_USER}" "$PYDS_DIR"
 
 log_info "Updating git submodules..."
 run_as_user "cd '$PYDS_DIR' && git submodule update --init --recursive"
@@ -137,7 +151,7 @@ log_info "Installing PyDS wheel into venv..."
 run_as_user "'$VENV_PATH/bin/python3' -m pip install --force-reinstall '$WHEEL_FILE'"
 
 log_info "Installing cuda-python package into venv..."
-run_as_user "'$VENV_PATH/bin/python3' -m pip install --upgrade 'cuda-python==12.8'"
+run_as_user "'$VENV_PATH/bin/python3' -m pip install --upgrade '$CUDA_PYTHON_PACKAGE_SPEC'"
 
 log_info "Verifying Python bindings installation..."
 
@@ -146,14 +160,14 @@ if ! run_as_user "'$VENV_PATH/bin/python3' -c 'import pyds; print(\"PyDS import 
     exit 1
 fi
 
-PYDS_VERSION="$(sudo -u "$INSTALL_USER" -H "$VENV_PATH/bin/python3" -c "import pyds; print(getattr(pyds, '__version__', 'unknown'))")"
+PYDS_VERSION="$(run_as_user "'$VENV_PATH/bin/python3' -c 'import pyds; print(getattr(pyds, \"__version__\", \"unknown\"))'")"
 
 log_info "Cleaning up build artifacts..."
 rm -rf "$PYDS_DIR/bindings/build"
 rm -rf "$PYDS_DIR/bindings/.eggs"
 
-sudo chown -R "$INSTALL_USER:$INSTALL_USER" "$WORK_DIR"
-sudo chown -R "$INSTALL_USER:$INSTALL_USER" "$PYDS_DIR"
+sudo chown -R "$INSTALL_USER:${INSTALL_GROUP:-$INSTALL_USER}" "$WORK_DIR"
+sudo chown -R "$INSTALL_USER:${INSTALL_GROUP:-$INSTALL_USER}" "$PYDS_DIR"
 
 log_success "Python bindings installation completed successfully"
 log_info "PyDS version: $PYDS_VERSION"

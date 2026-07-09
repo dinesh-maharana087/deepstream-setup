@@ -6,11 +6,11 @@
 # Override work dir: WORK_DIR=/custom/path bash install_all.sh
 # Skip GPU check (testing): GPU_REQUIRED=false bash install_all.sh
 
-set -e
-set -o pipefail
+set -Eeuo pipefail
 
 # Main orchestration error handler
-trap 'log_error "Installation orchestration failed at line $LINENO"; exit 1' ERR
+CURRENT_STEP_NAME="Orchestration"
+trap 'echo "[ERROR] Installation orchestration failed at line $LINENO: $BASH_COMMAND" >&2; exit 1' ERR
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -18,6 +18,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/config/versions.env"
 source "$SCRIPT_DIR/utils/logger.sh"
 source "$SCRIPT_DIR/utils/check.sh"
+
+trap 'log_failure "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" "${CURRENT_STEP_NAME:-Orchestration}"; exit 1' ERR
 
 # ============================================================================
 # SYSTEM VALIDATION
@@ -33,12 +35,12 @@ log_info "Starting system validation..."
 validate_system
 validate_versions_before_install
 
-# Ensure sudo is available (required for all installation steps)
-if ! sudo -n true 2>/dev/null; then
-    log_error "❌ This script requires sudo access without password prompt"
-    log_error "   Please configure sudoers to allow NOPASSWD access, or run with: sudo bash $0"
-    exit 1
-fi
+require_sudo
+ensure_user_owned_dir "$WORK_DIR"
+
+log_info "Install user: $INSTALL_USER"
+log_info "Install group: $INSTALL_GROUP"
+log_info "Install home: $INSTALL_HOME"
 
 log_info "Displaying system information..."
 system_summary
@@ -84,6 +86,7 @@ log_info "=================================================="
 for ((i=0; i<TOTAL_SCRIPTS; i++)); do
     CURRENT_STEP=$((i+1))
     SCRIPT_NAME="${SCRIPT_NAMES[$i]}"
+    CURRENT_STEP_NAME="$SCRIPT_NAME"
     SCRIPT_FILE="${INSTALL_SCRIPTS[$i]}"
     SCRIPT_PATH="$INSTALL_DIR/$SCRIPT_FILE"
     
@@ -108,11 +111,15 @@ for ((i=0; i<TOTAL_SCRIPTS; i++)); do
         log_success "✅ $SCRIPT_NAME completed successfully"
     else
         EXIT_CODE=$?
+        log_error "Failed step: $CURRENT_STEP/$TOTAL_SCRIPTS - $SCRIPT_NAME"
+        log_error "Failed script: $SCRIPT_PATH"
+        log_error "Exit code: $EXIT_CODE"
+        log_error "See detailed line/command failure above and in: $LOG_FILE"
         log_error "❌ $SCRIPT_NAME failed with exit code $EXIT_CODE"
         FAILED_SCRIPTS+=("$SCRIPT_FILE")
         
         # For failed installation, option to continue or abort
-        if [[ "$CONTINUE_ON_ERROR" != "true" ]]; then
+        if [[ "${CONTINUE_ON_ERROR:-false}" != "true" ]]; then
             log_error "Aborting installation due to script failure"
             log_error "To continue on error (testing only): CONTINUE_ON_ERROR=true bash $0"
             exit 1
@@ -145,10 +152,10 @@ if [ ${#FAILED_SCRIPTS[@]} -eq 0 ]; then
     log_info "     source $WORK_DIR/deepstream_venv/bin/activate"
     log_info ""
     log_info "  2. Test DeepStream installation:"
-    log_info "     /opt/nvidia/deepstream/tools/gst-launch-1.0 --version"
+    log_info "     $DS_DIR/bin/deepstream-app --version-all"
     log_info ""
     log_info "  3. Run DeepStream sample applications:"
-    log_info "     cd /opt/nvidia/deepstream/samples"
+    log_info "     cd $DS_DIR/samples"
     log_info ""
     log_info "Documentation: https://docs.nvidia.com/deepstream/"
     

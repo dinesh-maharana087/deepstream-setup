@@ -4,32 +4,31 @@
 # Removes temporary files and clears apt cache after successful installation
 # Usage: bash cleanup.sh
 
-set -e
-set -o pipefail
+set -Eeuo pipefail
 
-trap 'log_error "Cleanup failed at line $LINENO"; exit 1' ERR
+trap 'echo "[ERROR] Cleanup failed at line $LINENO: $BASH_COMMAND" >&2; exit 1' ERR
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Source utilities
 source "$SCRIPT_DIR/config/versions.env"
 source "$SCRIPT_DIR/utils/logger.sh"
+source "$SCRIPT_DIR/utils/check.sh"
+
+trap 'log_failure "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" "Cleanup"; exit 1' ERR
 
 log_info "=================================================="
 log_info "DeepStream 8.0 - Post-Installation Cleanup"
 log_info "=================================================="
 
-if ! sudo -n true 2>/dev/null; then
-    log_error "❌ This script requires sudo access"
-    exit 1
-fi
+require_sudo
 
 # Cleanup work directory temporary files
 log_info "Cleaning up installation temporary files..."
 
 TEMP_FILES=(
     "$WORK_DIR/deepstream.deb"
-    "$WORK_DIR/deepstream-*.deb"
+    "$WORK_DIR"/deepstream-*.deb
     "$WORK_DIR/nvidia-cuda-key.pub"
     "$WORK_DIR/cuda-key.gpg"
 )

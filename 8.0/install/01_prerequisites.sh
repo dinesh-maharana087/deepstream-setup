@@ -13,7 +13,7 @@ source "$SCRIPT_DIR/../config/versions.env"
 source "$SCRIPT_DIR/../utils/logger.sh"
 source "$SCRIPT_DIR/../utils/check.sh"
 
-trap 'log_error "Prerequisites installation failed at line ${LINENO}"; exit 1' ERR
+trap 'log_failure "${BASH_SOURCE[0]}" "${LINENO}" "${BASH_COMMAND}" "System Prerequisites"; exit 1' ERR
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -28,7 +28,15 @@ APT_OPTIONS=(
 )
 
 INSTALL_PACKAGES=(
-    libssl3
+    ca-certificates
+    curl
+    wget
+    gnupg
+    build-essential
+    cmake
+    g++
+    pkg-config
+    libssl3t64
     libssl-dev
     libgles2-mesa-dev
     libgstreamer1.0-0
@@ -51,6 +59,14 @@ INSTALL_PACKAGES=(
 )
 
 VERIFY_PACKAGES=(
+    ca-certificates
+    curl
+    wget
+    gnupg
+    build-essential
+    cmake
+    g++
+    pkg-config
     libssl3t64
     libssl-dev
     libgles2-mesa-dev
@@ -93,7 +109,7 @@ apt_update() {
             return 0
         fi
 
-        log_warning "apt update failed attempt ${attempt}/5. Retrying..."
+        log_warn "apt update failed attempt ${attempt}/5. Retrying..."
         sleep 5
     done
 
@@ -102,14 +118,7 @@ apt_update() {
 }
 
 check_sudo() {
-    if [[ "$EUID" -eq 0 ]]; then
-        return 0
-    fi
-
-    if ! sudo -v; then
-        log_error "sudo access is required."
-        exit 1
-    fi
+    require_sudo
 }
 
 check_broken_packages() {

@@ -1,9 +1,8 @@
 #!/bin/bash
 
 # Error handling: exit on any error, show line numbers
-set -e
-set -o pipefail
-trap 'log_error "DeepStream installation failed at line $LINENO"; cleanup_deepstream_install; exit 1' ERR
+set -Eeuo pipefail
+trap 'echo "[ERROR] DeepStream Runtime failed at line $LINENO: $BASH_COMMAND" >&2; exit 1' ERR
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -16,8 +15,10 @@ source "$SCRIPT_DIR/../utils/check.sh"
 cleanup_deepstream_install() {
     log_warn "Cleaning up DeepStream temporary files..."
     rm -f "$WORK_DIR/deepstream.deb"
-    rm -f "$WORK_DIR/deepstream-*.deb"
+    rm -f "$WORK_DIR"/deepstream-*.deb
 }
+
+trap 'log_failure "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" "DeepStream Runtime"; cleanup_deepstream_install; exit 1' ERR
 
 log_info "🔍 Checking DeepStream installation..."
 
@@ -25,10 +26,7 @@ log_info "🔍 Checking DeepStream installation..."
 validate_system
 validate_versions_before_install
 
-if ! sudo -n true 2>/dev/null; then
-    log_error "❌ This script requires sudo access"
-    exit 1
-fi
+require_sudo
 
 # Check if DeepStream is already installed (idempotency)
 if check_deepstream; then
@@ -45,7 +43,7 @@ if [[ ! "$DEEPSTREAM_VERSION" =~ ^[0-9]+\.[0-9]+$ ]]; then
 fi
 
 # Ensure work directory exists
-mkdir -p "$WORK_DIR"
+ensure_user_owned_dir "$WORK_DIR"
 cd "$WORK_DIR"
 
 # Construct download URL for DeepStream deb package
@@ -74,7 +72,7 @@ log_info "Downloaded: $DEB_FILE (size: $DEB_SIZE)"
 
 # Install the deb package
 log_info "Installing DeepStream package (this may take several minutes)..."
-sudo apt-get install -y "$DEB_FILE" 2>&1 | grep -v "^Reading\|^Building\|^Selecting"
+sudo apt-get install -y "$DEB_FILE"
 
 # Verify DeepStream installation
 log_info "Verifying DeepStream installation..."

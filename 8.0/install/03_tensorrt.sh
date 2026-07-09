@@ -20,7 +20,7 @@ source "$SCRIPT_DIR/../config/versions.env"
 source "$SCRIPT_DIR/../utils/logger.sh"
 source "$SCRIPT_DIR/../utils/check.sh"
 
-trap 'log_error "TensorRT installation failed at line ${LINENO}"; exit 1' ERR
+trap 'log_failure "${BASH_SOURCE[0]}" "${LINENO}" "${BASH_COMMAND}" "TensorRT"; exit 1' ERR
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -53,7 +53,7 @@ TENSORRT_PACKAGE_NAMES=(
 
 TENSORRT_PACKAGES=()
 for pkg in "${TENSORRT_PACKAGE_NAMES[@]}"; do
-    TENSORRT_PACKAGES+=("${pkg}=${TENSORRT_VERSION}")
+    TENSORRT_PACKAGES+=("${pkg}=${TENSORRT_PACKAGE_VERSION}")
 done
 
 wait_for_apt_lock() {
@@ -88,11 +88,11 @@ check_available_versions() {
     log_info "Checking TensorRT package availability..."
 
     for pkg in "${TENSORRT_PACKAGE_NAMES[@]}"; do
-        candidate="$(apt-cache madison "$pkg" | awk -v ver="$TENSORRT_VERSION" '$3 == ver {print $3; exit}')"
+        candidate="$(apt-cache madison "$pkg" | awk -v ver="$TENSORRT_PACKAGE_VERSION" '$3 == ver {print $3; exit}')"
 
-        if [[ "$candidate" != "$TENSORRT_VERSION" ]]; then
+        if [[ "$candidate" != "$TENSORRT_PACKAGE_VERSION" ]]; then
             log_error "Required version not available for package: $pkg"
-            log_error "Expected: $TENSORRT_VERSION"
+            log_error "Expected: $TENSORRT_PACKAGE_VERSION"
             exit 1
         fi
     done
@@ -114,7 +114,7 @@ simulate_install() {
         exit 1
     fi
 
-    if echo "$simulation_output" | grep -E "^Inst " | grep -v "$TENSORRT_VERSION" >/dev/null 2>&1; then
+    if echo "$simulation_output" | grep -E "^Inst " | grep -v "$TENSORRT_PACKAGE_VERSION" >/dev/null 2>&1; then
         log_error "Apt simulation indicates installation of unexpected package versions."
         echo "$simulation_output"
         log_error "Aborting for production safety."
@@ -134,10 +134,10 @@ verify_tensorrt_packages() {
     for pkg in "${TENSORRT_PACKAGE_NAMES[@]}"; do
         installed_version="$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null || true)"
 
-        if [[ "$installed_version" != "$TENSORRT_VERSION" ]]; then
+        if [[ "$installed_version" != "$TENSORRT_PACKAGE_VERSION" ]]; then
             log_error "$pkg version mismatch or not installed"
             log_error "  Installed: ${installed_version:-not installed}"
-            log_error "  Expected : $TENSORRT_VERSION"
+            log_error "  Expected : $TENSORRT_PACKAGE_VERSION"
             missing_or_wrong=1
         else
             log_success "$pkg = $installed_version"
@@ -155,21 +155,18 @@ log_info "Checking TensorRT installation..."
 validate_system
 validate_versions_before_install
 
-if ! sudo -n true 2>/dev/null; then
-    log_error "This script requires passwordless sudo access."
-    exit 1
-fi
+require_sudo
 
 wait_for_apt_lock
 check_broken_packages
 
-if dpkg-query -W -f='${Version}' libnvinfer10 2>/dev/null | grep -Fxq "$TENSORRT_VERSION"; then
-    log_success "TensorRT already installed: $TENSORRT_VERSION"
+if dpkg-query -W -f='${Version}' libnvinfer10 2>/dev/null | grep -Fxq "$TENSORRT_PACKAGE_VERSION"; then
+    log_success "TensorRT already installed: $TENSORRT_PACKAGE_VERSION"
     verify_tensorrt_packages
     exit 0
 fi
 
-log_info "Installing TensorRT version: $TENSORRT_VERSION"
+log_info "Installing TensorRT version: $TENSORRT_VERSION ($TENSORRT_PACKAGE_VERSION)"
 
 sudo apt-get update
 
@@ -183,4 +180,4 @@ check_broken_packages
 verify_tensorrt_packages
 
 log_success "TensorRT installation completed successfully."
-log_info "Expected TensorRT version: $TENSORRT_VERSION"
+log_info "Expected TensorRT package version: $TENSORRT_PACKAGE_VERSION"
