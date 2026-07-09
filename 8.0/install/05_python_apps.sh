@@ -26,6 +26,45 @@ run_as_user() {
     run_as_install_user "$1"
 }
 
+get_system_python() {
+    if [[ -x /usr/bin/python3 ]]; then
+        echo "/usr/bin/python3"
+        return 0
+    fi
+
+    command -v python3
+}
+
+system_python_has_pyds() {
+    local system_python
+    system_python="$(get_system_python)"
+
+    run_as_user "'$system_python' -c 'import pyds'" >/dev/null 2>&1
+}
+
+system_python_has_cuda_python() {
+    local system_python
+    system_python="$(get_system_python)"
+
+    run_as_user "'$system_python' -m pip show cuda-python" >/dev/null 2>&1
+}
+
+install_system_python_packages() {
+    local wheel_file="$1"
+    local system_python
+    system_python="$(get_system_python)"
+
+    log_info "Installing PyDS wheel into system Python..."
+    sudo -H "$system_python" -m pip install --break-system-packages --force-reinstall "$wheel_file"
+
+    log_info "Installing cuda-python package into system Python..."
+    sudo -H "$system_python" -m pip install --break-system-packages --upgrade "$CUDA_PYTHON_PACKAGE_SPEC"
+
+    log_info "Verifying system Python packages..."
+    run_as_user "'$system_python' -c 'import pyds; print(\"System PyDS import OK\")'"
+    run_as_user "'$system_python' -m pip show cuda-python >/dev/null"
+}
+
 log_info "Checking Python bindings installation..."
 
 validate_system
@@ -56,7 +95,13 @@ if [[ -x "$VENV_PATH/bin/python3" ]]; then
         PYDS_VERSION="$("$VENV_PATH/bin/python3" -c "import pyds; print(getattr(pyds, '__version__', 'unknown'))")"
         log_success "Python bindings already installed in venv"
         log_info "PyDS version: $PYDS_VERSION"
-        exit 0
+
+        if system_python_has_pyds && system_python_has_cuda_python; then
+            log_success "Python bindings and cuda-python already installed in system Python"
+            exit 0
+        fi
+
+        log_warn "System Python packages are missing; continuing to install them."
     fi
 fi
 
@@ -152,6 +197,8 @@ run_as_user "'$VENV_PATH/bin/python3' -m pip install --force-reinstall '$WHEEL_F
 
 log_info "Installing cuda-python package into venv..."
 run_as_user "'$VENV_PATH/bin/python3' -m pip install --upgrade '$CUDA_PYTHON_PACKAGE_SPEC'"
+
+install_system_python_packages "$WHEEL_FILE"
 
 log_info "Verifying Python bindings installation..."
 
